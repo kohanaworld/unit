@@ -51,7 +51,7 @@ pub(crate) enum Commands {
             short = 't',
             long = "output-format",
             default_value = "json-pretty",
-            help = "Output format: yaml, json, json-pretty (default)"
+            help = "Output format of the result"
         )]
         output_format: OutputFormat,
     },
@@ -68,7 +68,7 @@ pub(crate) enum Commands {
             short = 't',
             long = "output-format",
             default_value = "json-pretty",
-            help = "Output format: yaml, json, json-pretty (default)"
+            help = "Output format of the result"
         )]
         output_format: OutputFormat,
         #[arg(
@@ -98,7 +98,7 @@ pub(crate) enum Commands {
             short = 't',
             long = "output-format",
             default_value = "json-pretty",
-            help = "Output format: yaml, json, json-pretty (default)"
+            help = "Output format of the result"
         )]
         output_format: OutputFormat,
     },
@@ -110,7 +110,7 @@ pub(crate) enum Commands {
             short = 't',
             long = "output-format",
             default_value = "json-pretty",
-            help = "Output format: yaml, json, json-pretty (default)"
+            help = "Output format of the result"
         )]
         output_format: OutputFormat,
     },
@@ -119,12 +119,8 @@ pub(crate) enum Commands {
 
     #[command(about = "Export the current configuration of UNIT")]
     Export {
-        #[arg(
-            required = true,
-            short = 'f',
-            help = "tarball filename to save configuration to"
-        )]
-        filename: String
+        #[arg(required = true, short = 'f', help = "tarball filename to save configuration to")]
+        filename: String,
     },
 }
 
@@ -135,8 +131,8 @@ pub struct InstanceArgs {
         global = true,
         short = 't',
         long = "output-format",
-        default_value = "text",
-        help = "Output format: text, yaml, json, json-pretty (default)"
+        default_value = "json-pretty",
+        help = "Output format of the result"
     )]
     pub output_format: OutputFormat,
 
@@ -155,6 +151,9 @@ pub enum InstanceCommands {
         #[arg(required = true, help = "Path to mount application into container")]
         application: String,
 
+        #[arg(help = "Mount application directory as read only", short = 'r', long = "read-only")]
+        application_read_only: bool,
+
         #[arg(
             help = "Unitd Image to deploy",
             default_value = env!("CARGO_PKG_VERSION"),
@@ -170,8 +169,8 @@ pub struct ApplicationArgs {
         global = true,
         short = 't',
         long = "output-format",
-        default_value = "text",
-        help = "Output format: text, yaml, json, json-pretty (default)"
+        default_value = "json-pretty",
+        help = "Output format of the result"
     )]
     pub output_format: OutputFormat,
 

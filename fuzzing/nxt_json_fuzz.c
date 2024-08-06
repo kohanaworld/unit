@@ -31,12 +31,13 @@ LLVMFuzzerInitialize(int *argc, char ***argv)
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    nxt_mp_t               *mp;
-    nxt_str_t              input;
-    nxt_thread_t           *thr;
-    nxt_runtime_t          *rt;
-    nxt_conf_value_t       *conf;
-    nxt_conf_validation_t  vldt;
+    nxt_mp_t                *mp;
+    nxt_str_t               input;
+    nxt_thread_t            *thr;
+    nxt_runtime_t           *rt;
+    nxt_conf_value_t        *conf;
+    nxt_conf_validation_t   vldt;
+    nxt_conf_json_pretty_t  pretty;
 
     if (size < KMININPUTLENGTH || size > KMAXINPUTLENGTH) {
         return 0;
@@ -54,18 +55,27 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         goto failed;
     }
 
-    thr->runtime = rt;
-    rt->mem_pool = mp;
+    rt->languages = nxt_array_create(mp, 1, sizeof(nxt_app_lang_module_t));
+    if (rt->languages == NULL) {
+        goto failed;
+    }
 
     input.start = (u_char *)data;
     input.length = size;
+
+    thr->runtime = rt;
+    rt->mem_pool = mp;
+
+    nxt_memzero(&pretty, sizeof(nxt_conf_json_pretty_t));
+    nxt_memzero(&vldt, sizeof(nxt_conf_validation_t));
 
     conf = nxt_conf_json_parse_str(mp, &input);
     if (conf == NULL) {
         goto failed;
     }
 
-    nxt_memzero(&vldt, sizeof(nxt_conf_validation_t));
+    nxt_conf_json_length(conf, NULL);
+    nxt_conf_json_length(conf, &pretty);
 
     vldt.pool = nxt_mp_create(1024, 128, 256, 32);
     if (vldt.pool == NULL) {
@@ -76,13 +86,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     vldt.conf_pool = mp;
     vldt.ver = NXT_VERNUM;
 
-    rt->languages = nxt_array_create(mp, 1, sizeof(nxt_app_lang_module_t));
-    if (rt->languages == NULL) {
-        goto failed;
-    }
-
     nxt_conf_validate(&vldt);
-
     nxt_mp_destroy(vldt.pool);
 
 failed:
