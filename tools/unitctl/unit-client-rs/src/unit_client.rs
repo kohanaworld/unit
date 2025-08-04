@@ -9,7 +9,7 @@ use hyper::body::{Buf, HttpBody};
 use hyper::client::{HttpConnector, ResponseFuture};
 use hyper::Error as HyperError;
 use hyper::{http, Body, Client, Request};
-use hyper_tls::HttpsConnector;
+use hyper_rustls::{HttpsConnectorBuilder, HttpsConnector};
 use hyperlocal::{UnixClientExt, UnixConnector};
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ use unit_openapi::apis::{
 };
 use unit_openapi::models::{ConfigApplication, ConfigListener, Status};
 
-const USER_AGENT: &str = concat!("UNIT CLI/", env!("CARGO_PKG_VERSION"), "/rust");
+const USER_AGENT: &str = concat!("Unit CLI/", env!("CARGO_PKG_VERSION"), "/rust");
 
 custom_error! {pub UnitClientError
     OpenAPIError { source: OpenAPIError } = "OpenAPI error",
@@ -185,7 +185,14 @@ impl UnitClient {
     }
 
     pub fn new_http(control_socket: ControlSocket) -> Self {
-        let remote_client = Client::builder().build(HttpsConnector::new());
+        let remote_client = Client::builder()
+            .build(HttpsConnectorBuilder::default()
+                   .with_native_roots()
+                   .unwrap_or_else(|_| HttpsConnectorBuilder::default()
+                                   .with_webpki_roots())
+                   .https_or_http()
+                   .enable_all_versions()
+                   .wrap_connector(HttpConnector::new()));
         Self {
             control_socket,
             client: Box::from(RemoteClient::Tcp { client: remote_client }),
@@ -201,7 +208,7 @@ impl UnitClient {
         }
     }
 
-    /// Sends a request to UNIT and deserializes the JSON response body into the value of type `RESPONSE`.
+    /// Sends a request to Unit and deserializes the JSON response body into the value of type `RESPONSE`.
     pub async fn send_request_and_deserialize_response<RESPONSE: for<'de> serde::Deserialize<'de>>(
         &self,
         mut request: Request<Body>,

@@ -13,6 +13,7 @@
 #include <nxt_http.h>
 #include <nxt_sockaddr.h>
 #include <nxt_http_route_addr.h>
+#include <nxt_http_compression.h>
 #include <nxt_regex.h>
 
 
@@ -134,9 +135,17 @@ static nxt_int_t nxt_conf_vldt_python_protocol(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_python_prefix(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_listen_threads(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_threads(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_thread_stack_size(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_compressors(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_compression(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value);
+static nxt_int_t nxt_conf_vldt_compression_encoding(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_routes(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
@@ -176,6 +185,8 @@ static nxt_int_t nxt_conf_vldt_app_name(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_forwarded(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_listen_backlog(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_app(nxt_conf_validation_t *vldt,
     nxt_str_t *name, nxt_conf_value_t *value);
 static nxt_int_t nxt_conf_vldt_object(nxt_conf_validation_t *vldt,
@@ -212,6 +223,11 @@ static nxt_int_t nxt_conf_vldt_server_weight(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
 static nxt_int_t nxt_conf_vldt_access_log(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_access_log_format(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_conf_vldt_access_log_format_field(
+    nxt_conf_validation_t *vldt, const nxt_str_t *name,
+    nxt_conf_value_t *value);
 
 static nxt_int_t nxt_conf_vldt_isolation(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value, void *data);
@@ -237,11 +253,25 @@ static nxt_int_t nxt_conf_vldt_js_module_element(nxt_conf_validation_t *vldt,
     nxt_conf_value_t *value);
 #endif
 
+#if (NXT_HAVE_OTEL)
+static nxt_int_t nxt_otel_validate_batch_size(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_otel_validate_sample_ratio(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+static nxt_int_t nxt_otel_validate_protocol(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data);
+#endif
+
 
 static nxt_conf_vldt_object_t  nxt_conf_vldt_setting_members[];
 static nxt_conf_vldt_object_t  nxt_conf_vldt_http_members[];
+#if (NXT_HAVE_OTEL)
+static nxt_conf_vldt_object_t  nxt_conf_vldt_otel_members[];
+#endif
 static nxt_conf_vldt_object_t  nxt_conf_vldt_websocket_members[];
 static nxt_conf_vldt_object_t  nxt_conf_vldt_static_members[];
+static nxt_conf_vldt_object_t  nxt_conf_vldt_compression_members[];
+static nxt_conf_vldt_object_t  nxt_conf_vldt_compressor_members[];
 static nxt_conf_vldt_object_t  nxt_conf_vldt_forwarded_members[];
 static nxt_conf_vldt_object_t  nxt_conf_vldt_client_ip_members[];
 #if (NXT_TLS)
@@ -305,10 +335,21 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_root_members[] = {
 
 static nxt_conf_vldt_object_t  nxt_conf_vldt_setting_members[] = {
     {
+        .name       = nxt_string("listen_threads"),
+        .type       = NXT_CONF_VLDT_INTEGER,
+        .validator  = nxt_conf_vldt_listen_threads,
+    }, {
         .name       = nxt_string("http"),
         .type       = NXT_CONF_VLDT_OBJECT,
         .validator  = nxt_conf_vldt_object,
         .u.members  = nxt_conf_vldt_http_members,
+#if (NXT_HAVE_OTEL)
+    }, {
+        .name       = nxt_string("telemetry"),
+        .type       = NXT_CONF_VLDT_OBJECT,
+        .validator  = nxt_conf_vldt_object,
+        .u.members  = nxt_conf_vldt_otel_members,
+#endif
 #if (NXT_HAVE_NJS)
     }, {
         .name       = nxt_string("js_module"),
@@ -371,10 +412,43 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_http_members[] = {
     }, {
         .name       = nxt_string("chunked_transform"),
         .type       = NXT_CONF_VLDT_BOOLEAN,
+    }, {
+        .name       = nxt_string("compression"),
+        .type       = NXT_CONF_VLDT_OBJECT,
+        .validator  = nxt_conf_vldt_object,
+        .u.members  = nxt_conf_vldt_compression_members,
     },
 
     NXT_CONF_VLDT_END
 };
+
+
+#if (NXT_HAVE_OTEL)
+
+static nxt_conf_vldt_object_t  nxt_conf_vldt_otel_members[] = {
+    {
+        .name       = nxt_string("endpoint"),
+        .type       = NXT_CONF_VLDT_STRING,
+        .flags      = NXT_CONF_VLDT_REQUIRED
+    }, {
+        .name       = nxt_string("batch_size"),
+        .type       = NXT_CONF_VLDT_INTEGER,
+        .validator  = nxt_otel_validate_batch_size,
+    }, {
+        .name       = nxt_string("protocol"),
+        .type       = NXT_CONF_VLDT_STRING,
+        .validator  = nxt_otel_validate_protocol,
+        .flags      = NXT_CONF_VLDT_REQUIRED
+    }, {
+        .name       = nxt_string("sampling_ratio"),
+        .type       = NXT_CONF_VLDT_NUMBER,
+        .validator  = nxt_otel_validate_sample_ratio,
+    },
+
+    NXT_CONF_VLDT_END
+};
+
+#endif
 
 
 static nxt_conf_vldt_object_t  nxt_conf_vldt_websocket_members[] = {
@@ -405,6 +479,39 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_static_members[] = {
 };
 
 
+static nxt_conf_vldt_object_t  nxt_conf_vldt_compression_members[] = {
+    {
+        .name       = nxt_string("types"),
+        .type       = NXT_CONF_VLDT_STRING | NXT_CONF_VLDT_ARRAY,
+        .validator  = nxt_conf_vldt_match_patterns,
+    }, {
+        .name       = nxt_string("compressors"),
+        .type       = NXT_CONF_VLDT_OBJECT | NXT_CONF_VLDT_ARRAY,
+        .validator  = nxt_conf_vldt_compressors,
+    },
+
+    NXT_CONF_VLDT_END
+};
+
+
+static nxt_conf_vldt_object_t  nxt_conf_vldt_compressor_members[] = {
+    {
+        .name       = nxt_string("encoding"),
+        .type       = NXT_CONF_VLDT_STRING,
+        .flags      = NXT_CONF_VLDT_REQUIRED,
+        .validator  = nxt_conf_vldt_compression_encoding,
+    }, {
+        .name       = nxt_string("level"),
+        .type       = NXT_CONF_VLDT_INTEGER,
+    }, {
+        .name       = nxt_string("min_length"),
+        .type       = NXT_CONF_VLDT_INTEGER,
+    },
+
+    NXT_CONF_VLDT_END
+};
+
+
 static nxt_conf_vldt_object_t  nxt_conf_vldt_listener_members[] = {
     {
         .name       = nxt_string("pass"),
@@ -424,6 +531,10 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_listener_members[] = {
         .type       = NXT_CONF_VLDT_OBJECT,
         .validator  = nxt_conf_vldt_object,
         .u.members  = nxt_conf_vldt_client_ip_members
+    }, {
+        .name       = nxt_string("backlog"),
+        .type       = NXT_CONF_VLDT_NUMBER,
+        .validator  = nxt_conf_vldt_listen_backlog,
     },
 
 #if (NXT_TLS)
@@ -684,6 +795,10 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_match_members[] = {
         .type       = NXT_CONF_VLDT_OBJECT | NXT_CONF_VLDT_ARRAY,
         .validator  = nxt_conf_vldt_match_patterns_sets,
         .u.string   = "cookies"
+    }, {
+        .name       = nxt_string("if"),
+        .type       = NXT_CONF_VLDT_STRING,
+        .validator  = nxt_conf_vldt_if,
     },
 
     NXT_CONF_VLDT_END
@@ -1402,7 +1517,8 @@ static nxt_conf_vldt_object_t  nxt_conf_vldt_access_log_members[] = {
         .type       = NXT_CONF_VLDT_STRING,
     }, {
         .name       = nxt_string("format"),
-        .type       = NXT_CONF_VLDT_STRING,
+        .type       = NXT_CONF_VLDT_STRING | NXT_CONF_VLDT_OBJECT,
+        .validator  = nxt_conf_vldt_access_log_format,
     }, {
         .name       = nxt_string("if"),
         .type       = NXT_CONF_VLDT_STRING,
@@ -1447,6 +1563,60 @@ nxt_conf_validate(nxt_conf_validation_t *vldt)
 #define NXT_CONF_VLDT_ANY_TYPE_STR                                            \
     "either a null, a boolean, an integer, "                                  \
     "a number, a string, an array, or an object"
+
+
+#if (NXT_HAVE_OTEL)
+
+nxt_int_t
+nxt_otel_validate_batch_size(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    double  batch_size;
+
+    batch_size = nxt_conf_get_number(value);
+    if (batch_size <= 0) {
+        return NXT_ERROR;
+    }
+
+    return NXT_OK;
+}
+
+
+nxt_int_t
+nxt_otel_validate_sample_ratio(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    double  sample_ratio;
+
+    sample_ratio = nxt_conf_get_number(value);
+    if (sample_ratio < 0 || sample_ratio > 1) {
+        return NXT_ERROR;
+    }
+
+    return NXT_OK;
+}
+
+
+nxt_int_t
+nxt_otel_validate_protocol(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    nxt_str_t  proto;
+
+    nxt_conf_get_string(value, &proto);
+
+    if (nxt_str_eq(&proto, "HTTP", 4) || nxt_str_eq(&proto, "http", 4)) {
+        return NXT_OK;
+    }
+
+    if (nxt_str_eq(&proto, "GRPC", 4) || nxt_str_eq(&proto, "grpc", 4)) {
+        return NXT_OK;
+    }
+
+    return NXT_ERROR;
+}
+
+#endif
 
 
 static nxt_int_t
@@ -2078,6 +2248,27 @@ nxt_conf_vldt_python_prefix(nxt_conf_validation_t *vldt,
     return NXT_OK;
 }
 
+static nxt_int_t
+nxt_conf_vldt_listen_threads(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    int64_t  threads;
+
+    threads = nxt_conf_get_number(value);
+
+    if (threads < 1) {
+        return nxt_conf_vldt_error(vldt, "The \"listen_threads\" number must "
+                                   "be equal to or greater than 1.");
+    }
+
+    if (threads > NXT_INT32_T_MAX) {
+        return nxt_conf_vldt_error(vldt, "The \"listen_threads\" number must "
+                                   "not exceed %d.", NXT_INT32_T_MAX);
+    }
+
+    return NXT_OK;
+}
+
 
 static nxt_int_t
 nxt_conf_vldt_threads(nxt_conf_validation_t *vldt, nxt_conf_value_t *value,
@@ -2123,6 +2314,52 @@ nxt_conf_vldt_thread_stack_size(nxt_conf_validation_t *vldt,
     }
 
     return NXT_OK;
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_compressors(nxt_conf_validation_t *vldt, nxt_conf_value_t *value,
+    void *data)
+{
+    if (nxt_conf_type(value) == NXT_CONF_ARRAY) {
+        return nxt_conf_vldt_array_iterator(vldt, value,
+                                            &nxt_conf_vldt_compression);
+    }
+
+    /* NXT_CONF_OBJECT */
+
+    return nxt_conf_vldt_object_iterator(vldt, value,
+                                         &nxt_conf_vldt_compressor_members);
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_compression(nxt_conf_validation_t *vldt, nxt_conf_value_t *value)
+{
+    if (nxt_conf_type(value) != NXT_CONF_OBJECT) {
+        return nxt_conf_vldt_error(vldt,
+                                   "The \"compressors\" array must contain "
+                                   "only object values.");
+    }
+
+    return nxt_conf_vldt_object(vldt, value, nxt_conf_vldt_compressor_members);
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_compression_encoding(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    nxt_str_t  token;
+
+    nxt_conf_get_string(value, &token);
+
+    if (nxt_http_comp_compressor_is_valid(&token)) {
+        return NXT_OK;
+    }
+
+    return nxt_conf_vldt_error(vldt, "\"%V\" is not a supported compressor.",
+                               &token);
 }
 
 
@@ -2674,6 +2911,32 @@ nxt_conf_vldt_forwarded(nxt_conf_validation_t *vldt, nxt_conf_value_t *value,
     }
 
     return nxt_conf_vldt_object(vldt, value, nxt_conf_vldt_forwarded_members);
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_listen_backlog(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    int64_t  backlog;
+
+    backlog = nxt_conf_get_number(value);
+
+    /*
+     * POSIX allows this to be 0 and some systems use -1 to
+     * indicate to use the OS's default value.
+     */
+    if (backlog < -1) {
+        return nxt_conf_vldt_error(vldt, "The \"backlog\" number must be "
+                                   "equal to or greater than -1.");
+    }
+
+    if (backlog > NXT_INT32_T_MAX) {
+        return nxt_conf_vldt_error(vldt, "The \"backlog\" number must "
+                                   "not exceed %d.", NXT_INT32_T_MAX);
+    }
+
+    return NXT_OK;
 }
 
 
@@ -3456,6 +3719,49 @@ nxt_conf_vldt_access_log(nxt_conf_validation_t *vldt, nxt_conf_value_t *value,
 
     if (nxt_is_tstr(&conf.format)) {
         return nxt_conf_vldt_var(vldt, &format_str, &conf.format);
+    }
+
+    return NXT_OK;
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_access_log_format(nxt_conf_validation_t *vldt,
+    nxt_conf_value_t *value, void *data)
+{
+    static const nxt_str_t  format = nxt_string("format");
+
+    if (nxt_conf_type(value) == NXT_CONF_OBJECT) {
+        return nxt_conf_vldt_object_iterator(vldt, value,
+                                         nxt_conf_vldt_access_log_format_field);
+    }
+
+    /* NXT_CONF_STRING */
+
+    return nxt_conf_vldt_access_log_format_field(vldt, &format, value);
+}
+
+
+static nxt_int_t
+nxt_conf_vldt_access_log_format_field(nxt_conf_validation_t *vldt,
+    const nxt_str_t *name, nxt_conf_value_t *value)
+{
+    nxt_str_t  str;
+
+    if (name->length == 0) {
+        return nxt_conf_vldt_error(vldt, "In the access log format, the name "
+                                         "must not be empty.");
+    }
+
+    if (nxt_conf_type(value) != NXT_CONF_STRING) {
+        return nxt_conf_vldt_error(vldt, "In the access log format, the value "
+                                         "must be a string.");
+    }
+
+    nxt_conf_get_string(value, &str);
+
+    if (nxt_is_tstr(&str)) {
+        return nxt_conf_vldt_var(vldt, name, &str);
     }
 
     return NXT_OK;

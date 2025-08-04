@@ -99,6 +99,7 @@ def config_bundles(bundles):
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_REQUIRED
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
     context.load_verify_locations(f'{option.temp_dir}/root.crt')
 
     return context
@@ -254,8 +255,8 @@ def test_tls_sni_duplicated_bundle():
 
 def test_tls_sni_same_alt():
     bundles = {
-        "localhost": {"subj": "subj1", "alt_names": "same.altname.com"},
-        "example": {"subj": "subj2", "alt_names": "same.altname.com"},
+        "localhost": {"subj": "subj1", "alt_names": ["same.altname.com"]},
+        "example": {"subj": "subj2", "alt_names": ["same.altname.com"]},
     }
     ctx = config_bundles(bundles)
     add_tls(["localhost", "example"])

@@ -409,9 +409,6 @@ nxt_perl_psgi_module_create(const char *script)
 
     static const nxt_str_t  prefix = nxt_string(
         "package NGINX::Unit::Sandbox;"
-        "sub new {"
-        "   return bless {}, $_[0];"
-        "}"
         "{my $app = do \""
     );
 
@@ -676,7 +673,8 @@ nxt_perl_psgi_env_create(PerlInterpreter *my_perl,
 
     RC(nxt_perl_psgi_add_sptr(my_perl, hash_env, NL("SERVER_NAME"),
                               &r->server_name, r->server_name_length));
-    RC(nxt_perl_psgi_add_str(my_perl, hash_env, NL("SERVER_PORT"), "80", 2));
+    RC(nxt_perl_psgi_add_sptr(my_perl, hash_env, NL("SERVER_PORT"),
+                              &r->local_port, r->local_port_length));
 
     for (i = 0; i < r->fields_count; i++) {
         f = r->fields + i;

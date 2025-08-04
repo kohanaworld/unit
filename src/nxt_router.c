@@ -21,8 +21,14 @@
 #include <nxt_router_request.h>
 #include <nxt_app_queue.h>
 #include <nxt_port_queue.h>
+#include <nxt_http_compression.h>
 
 #define NXT_SHARED_PORT_ID  0xFFFFu
+
+#if (NXT_HAVE_OTEL)
+#define NXT_OTEL_BATCH_DEFAULT     128
+#define NXT_OTEL_SAMPLING_DEFAULT  1
+#endif
 
 typedef struct {
     nxt_str_t         type;
@@ -40,6 +46,7 @@ typedef struct {
 typedef struct {
     nxt_str_t         pass;
     nxt_str_t         application;
+    int               backlog;
 } nxt_router_listener_conf_t;
 
 
@@ -166,7 +173,7 @@ static void nxt_router_app_prefork_ready(nxt_task_t *task,
 static void nxt_router_app_prefork_error(nxt_task_t *task,
     nxt_port_recv_msg_t *msg, void *data);
 static nxt_socket_conf_t *nxt_router_socket_conf(nxt_task_t *task,
-    nxt_router_temp_conf_t *tmcf, nxt_str_t *name);
+    nxt_router_temp_conf_t *tmcf, nxt_str_t *name, int backlog);
 static nxt_int_t nxt_router_listen_socket_find(nxt_router_temp_conf_t *tmcf,
     nxt_socket_conf_t *nskcf, nxt_sockaddr_t *sa);
 
@@ -1412,7 +1419,7 @@ nxt_router_conf_send(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
 
 static nxt_conf_map_t  nxt_router_conf[] = {
     {
-        nxt_string("listeners_threads"),
+        nxt_string("listen_threads"),
         NXT_CONF_MAP_INT32,
         offsetof(nxt_router_conf_t, threads),
     },
@@ -1493,6 +1500,12 @@ static nxt_conf_map_t  nxt_router_listener_conf[] = {
         nxt_string("application"),
         NXT_CONF_MAP_STR_COPY,
         offsetof(nxt_router_listener_conf_t, application),
+    },
+
+    {
+        nxt_string("backlog"),
+        NXT_CONF_MAP_INT32,
+        offsetof(nxt_router_listener_conf_t, backlog),
     },
 };
 
@@ -1629,8 +1642,14 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
 #if (NXT_HAVE_NJS)
     nxt_conf_value_t            *js_module;
 #endif
+#if (NXT_HAVE_OTEL)
+    double                      telemetry_sample_fraction, telemetry_batching;
+    nxt_str_t                   telemetry_endpoint, telemetry_proto;
+    nxt_conf_value_t            *otel, *otel_endpoint, *otel_sampling,
+                                *otel_batching, *otel_proto;
+#endif
     nxt_conf_value_t            *root, *conf, *http, *value, *websocket;
-    nxt_conf_value_t            *applications, *application;
+    nxt_conf_value_t            *applications, *application, *settings;
     nxt_conf_value_t            *listeners, *listener;
     nxt_socket_conf_t           *skcf;
     nxt_router_conf_t           *rtcf;
@@ -1640,6 +1659,7 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
     nxt_router_app_conf_t       apcf;
     nxt_router_listener_conf_t  lscf;
 
+    static const nxt_str_t  settings_path = nxt_string("/settings");
     static const nxt_str_t  http_path = nxt_string("/settings/http");
     static const nxt_str_t  applications_path = nxt_string("/applications");
     static const nxt_str_t  listeners_path = nxt_string("/listeners");
@@ -1661,8 +1681,21 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
     static const nxt_str_t  static_path = nxt_string("/settings/http/static");
     static const nxt_str_t  websocket_path =
                                 nxt_string("/settings/http/websocket");
+    static const nxt_str_t  compression_path =
+                                nxt_string("/settings/http/compression");
     static const nxt_str_t  forwarded_path = nxt_string("/forwarded");
     static const nxt_str_t  client_ip_path = nxt_string("/client_ip");
+#if (NXT_HAVE_OTEL)
+    static const nxt_str_t  telemetry_path = nxt_string("/settings/telemetry");
+    static const nxt_str_t  telemetry_endpoint_path =
+                                nxt_string("/settings/telemetry/endpoint");
+    static const nxt_str_t  telemetry_batch_path =
+                                nxt_string("/settings/telemetry/batch_size");
+    static const nxt_str_t  telemetry_sample_path =
+                                nxt_string("/settings/telemetry/sampling_ratio");
+    static const nxt_str_t  telemetry_proto_path =
+                                nxt_string("/settings/telemetry/protocol");
+#endif
 
     root = nxt_conf_json_parse(tmcf->mem_pool, start, end, NULL);
     if (root == NULL) {
@@ -1673,11 +1706,14 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
     rtcf = tmcf->router_conf;
     mp = rtcf->mem_pool;
 
-    ret = nxt_conf_map_object(mp, root, nxt_router_conf,
-                              nxt_nitems(nxt_router_conf), rtcf);
-    if (ret != NXT_OK) {
-        nxt_alert(task, "root map error");
-        return NXT_ERROR;
+    settings = nxt_conf_get_path(root, &settings_path);
+    if (settings != NULL) {
+        ret = nxt_conf_map_object(mp, settings, nxt_router_conf,
+                                  nxt_nitems(nxt_router_conf), rtcf);
+        if (ret != NXT_OK) {
+            nxt_alert(task, "router_conf map error");
+            return NXT_ERROR;
+        }
     }
 
     if (rtcf->threads == 0) {
@@ -1964,12 +2000,9 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
                 break;
             }
 
-            skcf = nxt_router_socket_conf(task, tmcf, &name);
-            if (skcf == NULL) {
-                goto fail;
-            }
-
             nxt_memzero(&lscf, sizeof(lscf));
+
+            lscf.backlog = -1;
 
             ret = nxt_conf_map_object(mp, listener, nxt_router_listener_conf,
                                       nxt_nitems(nxt_router_listener_conf),
@@ -1980,6 +2013,11 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
             }
 
             nxt_debug(task, "application: %V", &lscf.application);
+
+            skcf = nxt_router_socket_conf(task, tmcf, &name, lscf.backlog);
+            if (skcf == NULL) {
+                goto fail;
+            }
 
             // STUB, default values if http block is not defined.
             skcf->header_buffer_size = 2048;
@@ -2009,12 +2047,19 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
             nxt_str_null(&skcf->body_temp_path);
 
             if (http != NULL) {
+                nxt_conf_value_t  *comp;
+
                 ret = nxt_conf_map_object(mp, http, nxt_router_http_conf,
                                           nxt_nitems(nxt_router_http_conf),
                                           skcf);
                 if (ret != NXT_OK) {
                     nxt_alert(task, "http map error");
                     goto fail;
+                }
+
+                comp = nxt_conf_get_path(root, &compression_path);
+                if (comp != NULL) {
+                    nxt_http_comp_compression_init(task, rtcf, comp);
                 }
             }
 
@@ -2157,6 +2202,34 @@ nxt_router_conf_create(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
         }
     }
 
+#endif
+
+#if (NXT_HAVE_OTEL)
+    otel = nxt_conf_get_path(root, &telemetry_path);
+
+    if (otel) {
+        otel_endpoint = nxt_conf_get_path(root, &telemetry_endpoint_path);
+        otel_batching = nxt_conf_get_path(root, &telemetry_batch_path);
+        otel_sampling = nxt_conf_get_path(root, &telemetry_sample_path);
+        otel_proto    = nxt_conf_get_path(root, &telemetry_proto_path);
+
+        nxt_conf_get_string(otel_endpoint, &telemetry_endpoint);
+        nxt_conf_get_string(otel_proto, &telemetry_proto);
+
+        telemetry_batching = otel_batching
+            ? nxt_conf_get_number(otel_batching)
+            : NXT_OTEL_BATCH_DEFAULT;
+
+        telemetry_sample_fraction = otel_sampling
+            ? nxt_conf_get_number(otel_sampling)
+            : NXT_OTEL_SAMPLING_DEFAULT;
+
+        nxt_otel_rs_init(&nxt_otel_log_callback, &telemetry_endpoint,
+                         &telemetry_proto, telemetry_sample_fraction,
+                         telemetry_batching);
+    } else {
+        nxt_otel_rs_uninit();
+    }
 #endif
 
     nxt_queue_add(&deleting_sockets, &router->sockets);
@@ -2684,7 +2757,7 @@ nxt_router_application_init(nxt_router_conf_t *rtcf, nxt_str_t *name,
 
 static nxt_socket_conf_t *
 nxt_router_socket_conf(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
-    nxt_str_t *name)
+    nxt_str_t *name, int backlog)
 {
     size_t               size;
     nxt_int_t            ret;
@@ -2728,7 +2801,7 @@ nxt_router_socket_conf(nxt_task_t *task, nxt_router_temp_conf_t *tmcf,
         nxt_listen_socket_remote_size(ls);
 
         ls->socket = -1;
-        ls->backlog = NXT_LISTEN_BACKLOG;
+        ls->backlog = backlog > -1 ? backlog : NXT_LISTEN_BACKLOG;
         ls->flags = NXT_NONBLOCK;
         ls->read_after_accept = 1;
     }
@@ -2875,7 +2948,7 @@ nxt_router_listen_socket_ready(nxt_task_t *task, nxt_port_recv_msg_t *msg,
 
     nxt_socket_defer_accept(task, s, rpc->socket_conf->listen->sockaddr);
 
-    ret = nxt_listen_socket(task, s, NXT_LISTEN_BACKLOG);
+    ret = nxt_listen_socket(task, s, rpc->socket_conf->listen->backlog);
     if (nxt_slow_path(ret != NXT_OK)) {
         goto fail;
     }
@@ -4118,8 +4191,13 @@ nxt_router_response_ready_handler(nxt_task_t *task, nxt_port_recv_msg_t *msg,
 
     if (r->header_sent) {
         nxt_buf_chain_add(&r->out, b);
-        nxt_http_request_send_body(task, r, NULL);
 
+        ret = nxt_http_comp_compress_app_response(task, r, &r->out);
+        if (ret == NXT_ERROR) {
+            goto fail;
+        }
+
+        nxt_http_request_send_body(task, r, NULL);
     } else {
         b_size = nxt_buf_is_mem(b) ? nxt_buf_mem_used_size(&b->mem) : 0;
 
@@ -4197,6 +4275,11 @@ nxt_router_response_ready_handler(nxt_task_t *task, nxt_port_recv_msg_t *msg,
 
         if (b != NULL) {
             nxt_buf_chain_add(&r->out, b);
+        }
+
+        ret = nxt_http_comp_check_compression(task, r);
+        if (ret != NXT_OK) {
+            goto fail;
         }
 
         nxt_http_request_header_send(task, r, nxt_http_request_send_body, NULL);

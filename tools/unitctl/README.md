@@ -63,11 +63,13 @@ Commands:
   execute    Sends raw JSON payload to Unit
   status     Get the current status of Unit
   listeners  List active listeners
+  apps       List all configured Unit applications
+  export     Export the current configuration of Unit
   help       Print this message or the help of the given subcommand(s)
 
 Options:
   -s, --control-socket-address <CONTROL_SOCKET_ADDRESS>
-          Path (unix:/var/run/unit/control.sock), tcp address with port (127.0.0.1:80), or URL
+          Path (unix:/var/run/unit/control.sock), tcp address with port (127.0.0.1:80), or URL. This flag can be specified multiple times.
   -w, --wait-timeout-seconds <WAIT_TIME_SECONDS>
           Number of seconds to wait for control socket to become available
   -t, --wait-max-tries <WAIT_MAX_TRIES>
@@ -150,7 +152,7 @@ Unitctl can also request from the API that an application be restarted.
 
 Listing applications:
 ```
-$ unitctl app list
+$ unitctl apps list
 {
   "wasm": {
     "type": "wasm-wasi-component",
@@ -161,7 +163,7 @@ $ unitctl app list
 
 Restarting an application:
 ```
-$ unitctl app reload wasm
+$ unitctl apps restart wasm
 {
   "success": "Ok"
 }

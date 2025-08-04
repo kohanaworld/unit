@@ -5,6 +5,7 @@
 
 #include <nxt_router.h>
 #include <nxt_http.h>
+#include <nxt_http_compression.h>
 
 
 typedef struct {
@@ -47,8 +48,8 @@ static nxt_http_action_t *nxt_http_static(nxt_task_t *task,
     nxt_http_request_t *r, nxt_http_action_t *action);
 static void nxt_http_static_iterate(nxt_task_t *task, nxt_http_request_t *r,
     nxt_http_static_ctx_t *ctx);
-static void nxt_http_static_send_ready(nxt_task_t *task, void *obj, void *data);
-static void nxt_http_static_send_error(nxt_task_t *task, void *obj, void *data);
+static void nxt_http_static_send(nxt_task_t *task, nxt_http_request_t *r,
+    nxt_http_static_ctx_t *ctx);
 static void nxt_http_static_next(nxt_task_t *task, nxt_http_request_t *r,
     nxt_http_static_ctx_t *ctx, nxt_http_status_t status);
 #if (NXT_HAVE_OPENAT2)
@@ -271,35 +272,44 @@ nxt_http_static_iterate(nxt_task_t *task, nxt_http_request_t *r,
         }
 #endif
 
-        nxt_http_static_send_ready(task, r, ctx);
-
     } else {
         rtcf = r->conf->socket_conf->router_conf;
 
         ret = nxt_tstr_query_init(&r->tstr_query, rtcf->tstr_state,
                                   &r->tstr_cache, r, r->mem_pool);
         if (nxt_slow_path(ret != NXT_OK)) {
-            nxt_http_request_error(task, r, NXT_HTTP_INTERNAL_SERVER_ERROR);
-            return;
+            goto fail;
         }
 
-        nxt_tstr_query(task, r->tstr_query, share->tstr, &ctx->share);
+        ret = nxt_tstr_query(task, r->tstr_query, share->tstr, &ctx->share);
+        if (nxt_slow_path(ret != NXT_OK)) {
+            goto fail;
+        }
 
 #if (NXT_HAVE_OPENAT2)
         if (conf->chroot != NULL && ctx->share_idx == 0) {
-            nxt_tstr_query(task, r->tstr_query, conf->chroot, &ctx->chroot);
+            ret = nxt_tstr_query(task, r->tstr_query, conf->chroot,
+                                 &ctx->chroot);
+            if (nxt_slow_path(ret != NXT_OK)) {
+                goto fail;
+            }
         }
 #endif
+    }
 
-        nxt_tstr_query_resolve(task, r->tstr_query, ctx,
-                               nxt_http_static_send_ready,
-                               nxt_http_static_send_error);
-     }
+    nxt_http_static_send(task, r, ctx);
+
+    return;
+
+fail:
+
+    nxt_http_request_error(task, r, NXT_HTTP_INTERNAL_SERVER_ERROR);
 }
 
 
 static void
-nxt_http_static_send_ready(nxt_task_t *task, void *obj, void *data)
+nxt_http_static_send(nxt_task_t *task, nxt_http_request_t *r,
+    nxt_http_static_ctx_t *ctx)
 {
     size_t                  length, encode;
     u_char                  *p, *fname;
@@ -314,13 +324,9 @@ nxt_http_static_send_ready(nxt_task_t *task, void *obj, void *data)
     nxt_http_status_t       status;
     nxt_router_conf_t       *rtcf;
     nxt_http_action_t       *action;
-    nxt_http_request_t      *r;
     nxt_work_handler_t      body_handler;
-    nxt_http_static_ctx_t   *ctx;
     nxt_http_static_conf_t  *conf;
 
-    r = obj;
-    ctx = data;
     action = ctx->action;
     conf = action->u.conf;
     rtcf = r->conf->socket_conf->router_conf;
@@ -571,7 +577,37 @@ nxt_http_static_send_ready(nxt_task_t *task, void *obj, void *data)
             field->value_length = mtype->length;
         }
 
+        r->resp.mime_type = mtype;
+
         if (ctx->need_body && nxt_file_size(&fi) > 0) {
+            ret = nxt_http_comp_check_compression(task, r);
+            if (ret == NXT_HTTP_NOT_ACCEPTABLE) {
+                nxt_http_request_error(task, r, NXT_HTTP_NOT_ACCEPTABLE);
+                return;
+            } else if (ret != NXT_OK) {
+                goto fail;
+            }
+
+            if (nxt_http_comp_wants_compression()) {
+                size_t     out_total;
+                nxt_int_t  ret;
+
+                ret = nxt_http_comp_compress_static_response(
+                                                    task, &f, &fi,
+                                                    NXT_HTTP_STATIC_BUF_SIZE,
+                                                    &out_total);
+                if (ret == NXT_ERROR) {
+                    goto fail;
+                }
+
+                ret = nxt_file_info(f, &fi);
+                if (nxt_slow_path(ret != NXT_OK)) {
+                    goto fail;
+                }
+
+                r->resp.content_length_n = out_total;
+            }
+
             fb = nxt_mp_zget(r->mem_pool, NXT_BUF_FILE_SIZE);
             if (nxt_slow_path(fb == NULL)) {
                 goto fail;
@@ -657,17 +693,6 @@ fail:
     if (f != NULL) {
         nxt_file_close(task, f);
     }
-
-    nxt_http_request_error(task, r, NXT_HTTP_INTERNAL_SERVER_ERROR);
-}
-
-
-static void
-nxt_http_static_send_error(nxt_task_t *task, void *obj, void *data)
-{
-    nxt_http_request_t  *r;
-
-    r = obj;
 
     nxt_http_request_error(task, r, NXT_HTTP_INTERNAL_SERVER_ERROR);
 }
@@ -963,6 +988,7 @@ nxt_http_static_mtypes_init(nxt_mp_t *mp, nxt_lvlhsh_t *hash)
         { nxt_string("text/x-rst"),     ".rst"   },
 
         { nxt_string("application/javascript"),  ".js"   },
+        { nxt_string("application/javascript"),  ".mjs"  },
         { nxt_string("application/json"),        ".json" },
         { nxt_string("application/xml"),         ".xml"  },
         { nxt_string("application/rss+xml"),     ".rss"  },

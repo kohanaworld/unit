@@ -8,6 +8,7 @@
 #define _NXT_HTTP_H_INCLUDED_
 
 #include <nxt_regex.h>
+#include <nxt_otel.h>
 
 
 typedef enum {
@@ -32,6 +33,7 @@ typedef enum {
     NXT_HTTP_FORBIDDEN = 403,
     NXT_HTTP_NOT_FOUND = 404,
     NXT_HTTP_METHOD_NOT_ALLOWED = 405,
+    NXT_HTTP_NOT_ACCEPTABLE = 406,
     NXT_HTTP_REQUEST_TIMEOUT = 408,
     NXT_HTTP_LENGTH_REQUIRED = 411,
     NXT_HTTP_PAYLOAD_TOO_LARGE = 413,
@@ -110,6 +112,7 @@ typedef struct {
     nxt_http_field_t                *content_type;
     nxt_http_field_t                *content_length;
     nxt_off_t                       content_length_n;
+    const nxt_str_t                 *mime_type;
 } nxt_http_response_t;
 
 
@@ -189,6 +192,10 @@ struct nxt_http_request_s {
     nxt_work_t                      err_work;
 
     nxt_http_response_t             resp;
+
+#if (NXT_HAVE_OTEL)
+    nxt_otel_state_t                *otel;
+#endif
 
     nxt_http_status_t               status:16;
 
@@ -440,6 +447,9 @@ void nxt_h1p_websocket_frame_start(nxt_task_t *task, nxt_http_request_t *r,
 void nxt_h1p_complete_buffers(nxt_task_t *task, nxt_h1proto_t *h1p,
     nxt_bool_t all);
 nxt_msec_t nxt_h1p_conn_request_timer_value(nxt_conn_t *c, uintptr_t data);
+
+int nxt_http_cond_value(nxt_task_t *task, nxt_http_request_t *r,
+    nxt_tstr_cond_t *cond);
 
 extern const nxt_conn_state_t  nxt_h1p_idle_close_state;
 

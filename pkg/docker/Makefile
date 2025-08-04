@@ -9,6 +9,7 @@ VERSION ?= $(DEFAULT_VERSION)
 PATCHLEVEL ?= 1
 
 MODULES ?= go jsc node perl php python ruby wasm
+MODULES_SLIM ?= python
 
 VARIANT ?= bookworm
 
@@ -19,7 +20,7 @@ INSTALL_minimal ?=	version
 RUN_minimal ?=		/bin/true
 MODULE_PREBUILD_minimal ?= /bin/true
 
-VERSIONS_go ?=		1.21 1.22
+VERSIONS_go ?=		1.22 1.23
 VARIANT_go ?=		$(VARIANT)
 $(foreach goversion, $(VERSIONS_go), $(eval CONTAINER_go$(goversion) = golang:$(goversion)-$(VARIANT_go)))
 CONFIGURE_go ?=		go --go-path=$$GOPATH
@@ -51,7 +52,7 @@ INSTALL_perl ?=		perl-install
 RUN_perl ?=			/bin/true
 MODULE_PREBUILD_perl ?=	/bin/true
 
-VERSIONS_php ?=		8.2 8.3
+VERSIONS_php ?=		8.3 8.4
 VARIANT_php ?=		cli-$(VARIANT)
 $(foreach phpversion, $(VERSIONS_php), $(eval CONTAINER_php$(phpversion) = php:$(phpversion)-$(VARIANT_php)))
 CONFIGURE_php ?=	php
@@ -59,9 +60,10 @@ INSTALL_php ?=		php-install
 RUN_php ?=			ldconfig
 MODULE_PREBUILD_php ?= /bin/true
 
-VERSIONS_python ?=  3.11 3.12
+VERSIONS_python ?=  3.12 3.13
 VARIANT_python ?=	$(VARIANT)
 $(foreach pythonversion, $(VERSIONS_python), $(eval CONTAINER_python$(pythonversion) = python:$(pythonversion)-$(VARIANT_python)))
+$(foreach pythonversion, $(VERSIONS_python), $(eval CONTAINER_python$(pythonversion)-slim = python:$(pythonversion)-slim-$(VARIANT_python)))
 CONFIGURE_python ?=	python --config=/usr/local/bin/python3-config
 INSTALL_python ?=	python3-install
 RUN_python ?=		/bin/true
@@ -77,41 +79,23 @@ MODULE_PREBUILD_ruby ?=	/bin/true
 
 VERSIONS_wasm ?=
 CONTAINER_wasm ?= debian:$(VARIANT)-slim
-CONFIGURE_wasm ?= wasm --include-path=\`pwd\`/pkg/contrib/wasmtime/crates/c-api/include --lib-path=/usr/lib/\$$(dpkg-architecture -q DEB_HOST_MULTIARCH)/ \&\& ./configure wasm-wasi-component
+CONFIGURE_wasm ?= wasm --include-path=\`pwd\`/pkg/contrib/wasmtime/artifacts/include --lib-path=/usr/lib/\$$(dpkg-architecture -q DEB_HOST_MULTIARCH)/ \&\& ./configure wasm-wasi-component
 INSTALL_wasm ?=   wasm-install wasm-wasi-component-install
 RUN_wasm ?=       /bin/true
 
 define MODULE_PREBUILD_wasm
-apt-get install --no-install-recommends --no-install-suggests -y libclang-dev \\\n \
-\ \ \ \&\& export RUST_VERSION=1.79.0 \\\n \
-\ \ \ \&\& export RUSTUP_HOME=/usr/src/unit/rustup \\\n \
-\ \ \ \&\& export CARGO_HOME=/usr/src/unit/cargo \\\n    \
-\ \ \ \&\& export PATH=/usr/src/unit/cargo/bin:\$$PATH \\\n \
-\ \ \ \&\& dpkgArch="\$$\(dpkg --print-architecture\)" \\\n \
-\ \ \ \&\& case "\$${dpkgArch##*-}" in \\\n \
-\ \ \ \ \ \ amd64\) rustArch="x86_64-unknown-linux-gnu"; rustupSha256="6aeece6993e902708983b209d04c0d1dbb14ebb405ddb87def578d41f920f56d" ;; \\\n \
-\ \ \ \ \ \ arm64\) rustArch="aarch64-unknown-linux-gnu"; rustupSha256="1cffbf51e63e634c746f741de50649bbbcbd9dbe1de363c9ecef64e278dba2b2" ;; \\\n \
-\ \ \ \ \ \ *\) echo \>\&2 "unsupported architecture: \$${dpkgArch}"; exit 1 ;; \\\n \
-\ \ \ \esac \\\n \
-\ \ \ \&\& url="https://static.rust-lang.org/rustup/archive/1.27.1/\$${rustArch}/rustup-init" \\\n \
-\ \ \ \&\& curl -L -O "\$$url" \\\n \
-\ \ \ \&\& echo "\$${rustupSha256} *rustup-init" | sha256sum -c - \\\n \
-\ \ \ \&\& chmod +x rustup-init \\\n \
-\ \ \ \&\& ./rustup-init -y --no-modify-path --profile minimal --default-toolchain \$$RUST_VERSION --default-host \$${rustArch} \\\n \
-\ \ \ \&\& rm rustup-init \\\n \
-\ \ \ \&\& rustup --version \\\n \
-\ \ \ \&\& cargo --version \\\n \
-\ \ \ \&\& rustc --version \\\n \
-\ \ \ \&\& make -C pkg/contrib .wasmtime \\\n \
-\ \ \ \&\& install -pm 755 pkg/contrib/wasmtime/target/release/libwasmtime.so /usr/lib/\$$\(dpkg-architecture -q DEB_HOST_MULTIARCH\)/
+make -C pkg/contrib .wasmtime \\\n \
+\ \ \ \&\& install -pm 755 pkg/contrib/wasmtime/artifacts/lib/libwasmtime.so /usr/lib/\$$\(dpkg-architecture -q DEB_HOST_MULTIARCH\)/
 endef
 
 default:
 	@echo "valid targets: all build dockerfiles library clean"
 
-MODVERSIONS = $(foreach module, $(MODULES), $(foreach modversion, $(shell for v in $(VERSIONS_$(module)); do echo $$v; done | sort -r), $(module)$(modversion))) wasm minimal
+MODVERSIONS = $(foreach module, $(MODULES), $(foreach modversion, $(shell for v in $(VERSIONS_$(module)); do echo $$v; done | sort -r), $(module)$(modversion)))
+MODVERSIONS += $(foreach module, $(MODULES_SLIM), $(foreach modversion, $(shell for v in $(VERSIONS_$(module)); do echo $$v; done | sort -r), $(module)$(modversion)-slim))
+MODVERSIONS += wasm minimal
 
-modname = $(shell echo $1 | /usr/bin/tr -d '.01234567890-')
+modname = $(shell echo $1 | /usr/bin/tr -d '.01234567890-' | sed 's/slim//')
 
 dockerfiles: $(addprefix Dockerfile., $(MODVERSIONS))
 build: $(addprefix build-, $(MODVERSIONS))
@@ -132,6 +116,7 @@ Dockerfile.%: ../../version template.Dockerfile
 build-%: Dockerfile.%
 	docker pull $(CONTAINER_$*)
 	docker build --no-cache -t unit:$(VERSION)-$* -f Dockerfile.$* .
+	touch $@
 
 library:
 	@echo "# this file is generated via https://github.com/nginx/unit/blob/$(shell git describe --always --abbrev=0 HEAD)/pkg/docker/Makefile"
@@ -141,10 +126,14 @@ library:
 	@previous=""; \
 	 for mod in $(MODVERSIONS); do \
 		echo ""; \
-		modname="$$( echo $$mod | tr -d '.0123456789-' )"; \
-		TAGS="$$mod $${mod%%.*} $$modname" ; \
+		modname="$$( echo $$mod | tr -d '.0123456789')"; \
+		modmajor="$${mod%%.*}"; \
+		if test "$${mod#*slim}" != "$$mod"; then \
+			modmajor="$${modmajor}-slim"; \
+		fi; \
+		TAGS="$$mod $$modmajor $$modname"; \
 		TAGS="$$(echo $$TAGS | tr " " "\n" | sort -u -r | tr "\n" "," | sed "s/,/, /g")"; \
-		if [ "$$previous" = "$$modname" ]; then \
+		if test "$${previous#*"$$modname"}" != "$$previous"; then \
 			echo "Tags: $(VERSION)-$$mod, $$mod"; \
 		else \
 			if [ "$$mod" = "minimal" ]; then \
@@ -154,11 +143,11 @@ library:
 			fi; \
 		fi; \
 		echo "Architectures: amd64, arm64v8"; \
-		echo "GitFetch: refs/heads/branches/packaging"; \
+		echo "GitFetch: refs/heads/packaging"; \
 		echo "GitCommit: $(shell git describe --always --abbrev=0 HEAD)"; \
 		echo "Directory: pkg/docker"; \
 		echo "File: Dockerfile.$$mod"; \
-		previous=$$(echo $$mod | tr -d '.0123456789-'); \
+		previous="$$previous $$modname"; \
 	done
 
 diff: $(addprefix diff-, $(MODVERSIONS))
@@ -170,5 +159,6 @@ all: $(addprefix Dockerfile., $(MODVERSIONS))
 
 clean:
 	rm -f Dockerfile.*
+	rm -f build-*
 
 .PHONY: default build dockerfiles clean library

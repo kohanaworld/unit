@@ -8,6 +8,7 @@ on:
       - 'go/**'
       - 'src/**'
       - 'test/**'
+      - 'pkg/contrib/**'
       - '.github/workflows/ci.yml'
   push:
     branches: master
@@ -17,6 +18,7 @@ on:
       - 'go/**'
       - 'src/**'
       - 'test/**'
+      - 'pkg/contrib/**'
       - '.github/workflows/ci.yml'
 
 jobs:
@@ -45,8 +47,6 @@ jobs:
           - build: node-21
             os: ubuntu-latest
           - build: perl
-            os: ubuntu-latest
-          - build: php-8.1
             os: ubuntu-latest
           - build: php-8.2
             os: ubuntu-latest
@@ -99,12 +99,21 @@ jobs:
       # https://github.com/actions/runner-images/issues/2821
       - name: Kill mono process
         run: |
-          sudo systemctl stop mono-xsp4.service
-          sudo systemctl mask mono-xsp4.service
-          sudo systemctl status mono-xsp4.service || true
-          PID=$(sudo lsof -t -i :8084)
-          echo "Killing PID $PID"
-          sudo kill -9 $PID
+          set +e
+          sudo systemctl status mono-xsp4.service
+          if [ $? -ne 0 ]; then
+            true
+          else
+            sudo systemctl stop mono-xsp4.service
+            sudo systemctl mask mono-xsp4.service
+            sudo systemctl status mono-xsp4.service
+            PID=$(sudo lsof -t -i :8084)
+            echo "Killing PID $PID"
+            sudo kill -9 $PID
+          fi
+
+      - name: Install packages
+        run: sudo apt-get -y install libbrotli-dev
 
       ##
       ## njs
@@ -133,6 +142,9 @@ jobs:
             --tests \
             --openssl \
             --njs \
+            --zlib \
+            --zstd \
+            --brotli \
             --cc-opt="-I njs/src/ -I njs/build"  \
             --ld-opt="-L njs/build"
 
@@ -303,7 +315,7 @@ jobs:
 
       - name: Configure wasm
         run: |
-          ./configure wasm --include-path=pkg/contrib/wasmtime/crates/c-api/include --lib-path=pkg/contrib/wasmtime/target/release
+          ./configure wasm --include-path=pkg/contrib/wasmtime/artifacts/include --lib-path=pkg/contrib/wasmtime/artifacts/lib
         if: steps.metadata.outputs.module == 'wasm'
 
       - name: Make wasm
@@ -318,6 +330,7 @@ jobs:
       - name: Setup rust
         run: |
           curl https://sh.rustup.rs | sh -s -- -y
+          cargo install cargo-component
         if: steps.metadata.outputs.module == 'wasm-wasi-component'
 
       - name: Configure wasm-wasi-component
@@ -347,18 +360,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3'
-        if: steps.metadata.outputs.module != 'wasm' &&
-            steps.metadata.outputs.module != 'wasm-wasi-component'
+        if: steps.metadata.outputs.module != 'wasm'
 
       - name: Install pytest
         run: |
-          sudo -H pip install pytest
-        if: steps.metadata.outputs.module != 'wasm' &&
-            steps.metadata.outputs.module != 'wasm-wasi-component'
+          sudo apt install -y python3-pytest
+
+        if: steps.metadata.outputs.module != 'wasm'
 
       - name: Run ${{ steps.metadata.outputs.module }} tests
         run: |
-          sudo -E pytest --print-log ${{ steps.metadata.outputs.testpath }}
-        # Skip pytest if wasm build, as there are no tests yet
-        if: steps.metadata.outputs.module != 'wasm' &&
-            steps.metadata.outputs.module != 'wasm-wasi-component'
+          if [ "${{ matrix.build }}" == "wasm-wasi-component" ]; then
+            pytest-3 --print-log ${{ steps.metadata.outputs.testpath }}
+          else
+            sudo -E pytest-3 --print-log ${{ steps.metadata.outputs.testpath }}
+          fi
+        if: steps.metadata.outputs.module != 'wasm'

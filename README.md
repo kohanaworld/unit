@@ -8,11 +8,13 @@
 
 ![NGINX Unit Logo](docs/unitlogo.svg)
 
+Please see: [SUPPORT.md](/SUPPORT.md)
+
 NGINX Unit is a lightweight and versatile open-source server that has
 two primary capabilities:
 
 - serves static media assets,
-- runs application code in seven languages.
+- runs application code in eight languages.
 
 Unit compresses several layers of the modern application stack into a potent,
 coherent solution with a focus on performance, low latency, and scalability. It

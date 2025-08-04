@@ -178,6 +178,10 @@ static nxt_http_field_proc_t           nxt_h1p_fields[] = {
     { nxt_string("Content-Length"),    &nxt_http_request_content_length, 0 },
     { nxt_string("Authorization"),     &nxt_http_request_field,
         offsetof(nxt_http_request_t, authorization) },
+#if (NXT_HAVE_OTEL)
+    { nxt_string("Traceparent"),       &nxt_otel_parse_traceparent, 0 },
+    { nxt_string("Tracestate"),        &nxt_otel_parse_tracestate,  0 },
+#endif
 };
 
 
@@ -518,6 +522,9 @@ nxt_h1p_conn_request_init(nxt_task_t *task, void *obj, void *data)
             h1p->parser.discard_unsafe_fields = skcf->discard_unsafe_fields;
 
             nxt_h1p_conn_request_header_parse(task, c, h1p);
+
+            NXT_OTEL_TRACE();
+
             return;
         }
 
@@ -752,24 +759,23 @@ nxt_h1p_header_buffer_test(nxt_task_t *task, nxt_h1proto_t *h1p, nxt_conn_t *c,
 static nxt_int_t
 nxt_h1p_connection(void *ctx, nxt_http_field_t *field, uintptr_t data)
 {
+    const u_char        *end;
     nxt_http_request_t  *r;
 
     r = ctx;
     field->hopbyhop = 1;
 
-    if (field->value_length == 5
-        && nxt_memcasecmp(field->value, "close", 5) == 0)
-    {
+    end = field->value + field->value_length;
+
+    if (nxt_memcasestrn(field->value, end, "close", 5) != NULL) {
         r->proto.h1->keepalive = 0;
+    }
 
-    } else if (field->value_length == 10
-               && nxt_memcasecmp(field->value, "keep-alive", 10) == 0)
-    {
+    if (nxt_memcasestrn(field->value, end, "keep-alive", 10) != NULL) {
         r->proto.h1->keepalive = 1;
+    }
 
-    } else if (field->value_length == 7
-               && nxt_memcasecmp(field->value, "upgrade", 7) == 0)
-    {
+    if (nxt_memcasestrn(field->value, end, "upgrade", 7) != NULL) {
         r->proto.h1->connection_upgrade = 1;
     }
 
@@ -1331,6 +1337,8 @@ nxt_h1p_request_header_send(nxt_task_t *task, nxt_http_request_t *r,
     };
 
     nxt_debug(task, "h1p request header send");
+
+    NXT_OTEL_TRACE();
 
     r->header_sent = 1;
     h1p = r->proto.h1;
@@ -2869,6 +2877,11 @@ nxt_h1p_peer_body_process(nxt_task_t *task, nxt_http_peer_t *peer,
     } else if (h1p->remainder > 0) {
         length = nxt_buf_chain_length(out);
         h1p->remainder -= length;
+
+        if (h1p->remainder == 0) {
+            nxt_buf_chain_add(&out, nxt_http_buf_last(peer->request));
+            peer->closed = 1;
+        }
     }
 
     peer->body = out;

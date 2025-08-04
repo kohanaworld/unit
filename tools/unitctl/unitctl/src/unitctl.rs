@@ -14,9 +14,11 @@ pub(crate) struct UnitCtl {
         short = 's',
         long = "control-socket-address",
         value_parser = parse_control_socket_address,
-        help = "Path (unix:/var/run/unit/control.sock), tcp address with port (127.0.0.1:80), or URL"
+        value_name = "CONTROL_SOCKET_ADDRESS",
+        help = "Path (unix:/var/run/unit/control.sock), tcp address with port (127.0.0.1:80), or URL. This flag can be specified multiple times."
     )]
     pub(crate) control_socket_addresses: Option<Vec<ControlSocket>>,
+
     #[arg(
         required = false,
         default_missing_value = "1",
@@ -26,6 +28,7 @@ pub(crate) struct UnitCtl {
         help = "Number of seconds to wait for control socket to become available"
     )]
     pub(crate) wait_time_seconds: Option<u8>,
+
     #[arg(
         required = false,
         default_value = "3",
@@ -35,6 +38,7 @@ pub(crate) struct UnitCtl {
         help = "Number of times to try to access control socket when waiting"
     )]
     pub(crate) wait_max_tries: Option<u8>,
+
     #[command(subcommand)]
     pub(crate) command: Commands,
 }
@@ -43,6 +47,7 @@ pub(crate) struct UnitCtl {
 pub(crate) enum Commands {
     #[command(about = "List all running Unit processes")]
     Instances(InstanceArgs),
+
     #[command(about = "Open current Unit configuration in editor")]
     Edit {
         #[arg(
@@ -55,11 +60,13 @@ pub(crate) enum Commands {
         )]
         output_format: OutputFormat,
     },
+
     #[command(about = "Import configuration from a directory")]
     Import {
         #[arg(required = true, help = "Directory to import from")]
         directory: PathBuf,
     },
+
     #[command(about = "Sends raw JSON payload to Unit")]
     Execute {
         #[arg(
@@ -71,6 +78,7 @@ pub(crate) enum Commands {
             help = "Output format of the result"
         )]
         output_format: OutputFormat,
+
         #[arg(
             required = false,
             global = true,
@@ -79,17 +87,20 @@ pub(crate) enum Commands {
             help = "Input file (json, json5, cjson, hjson yaml, pem) to send to unit when applicable use - for stdin"
         )]
         input_file: Option<String>,
+
         #[arg(
-        help = "HTTP method to use (GET, POST, PUT, DELETE)",
-        required = true,
-        short = 'm',
-        long = "http-method",
-        value_parser = parse_http_method,
+            required = true,
+            short = 'm',
+            long = "http-method",
+            value_parser = parse_http_method,
+            help = "HTTP method to use (GET, POST, PUT, DELETE)",
         )]
         method: String,
+
         #[arg(required = true, short = 'p', long = "path")]
         path: String,
     },
+
     #[command(about = "Get the current status of Unit")]
     Status {
         #[arg(
@@ -102,6 +113,7 @@ pub(crate) enum Commands {
         )]
         output_format: OutputFormat,
     },
+
     #[command(about = "List active listeners")]
     Listeners {
         #[arg(
@@ -114,10 +126,11 @@ pub(crate) enum Commands {
         )]
         output_format: OutputFormat,
     },
-    #[command(about = "List all configured Unit applications")]
-    App(ApplicationArgs),
 
-    #[command(about = "Export the current configuration of UNIT")]
+    #[command(about = "List all configured Unit applications")]
+    Apps(ApplicationArgs),
+
+    #[command(about = "Export the current configuration of Unit")]
     Export {
         #[arg(required = true, short = 'f', help = "tarball filename to save configuration to")]
         filename: String,
@@ -181,8 +194,8 @@ pub struct ApplicationArgs {
 #[derive(Debug, Subcommand)]
 #[command(args_conflicts_with_subcommands = true)]
 pub enum ApplicationCommands {
-    #[command(about = "reload a running application")]
-    Reload {
+    #[command(about = "restart a running application")]
+    Restart {
         #[arg(required = true, help = "name of application")]
         name: String,
     },

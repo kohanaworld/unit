@@ -6,6 +6,7 @@
 
 #include <nxt_router.h>
 #include <nxt_http.h>
+#include <nxt_otel.h>
 
 
 static nxt_int_t nxt_http_validate_host(nxt_str_t *host, nxt_mp_t *mp);
@@ -24,8 +25,6 @@ static void nxt_http_request_proto_info(nxt_task_t *task,
 static void nxt_http_request_mem_buf_completion(nxt_task_t *task, void *obj,
     void *data);
 static void nxt_http_request_done(nxt_task_t *task, void *obj, void *data);
-static nxt_int_t nxt_http_request_access_log(nxt_task_t *task,
-    nxt_http_request_t *r, nxt_router_conf_t *rtcf);
 
 static u_char *nxt_http_date_cache_handler(u_char *buf, nxt_realtime_t *now,
     struct tm *tm, size_t size, const char *format);
@@ -286,6 +285,16 @@ nxt_http_request_create(nxt_task_t *task)
 
     r->tstr_cache.var.pool = mp;
 
+#if (NXT_HAVE_OTEL)
+    if (nxt_otel_rs_is_init()) {
+        r->otel = nxt_mp_zget(r->mem_pool, sizeof(nxt_otel_state_t));
+        if (nxt_slow_path(r->otel == NULL)) {
+            goto fail;
+        }
+        r->otel->status = NXT_OTEL_INIT_STATE;
+    }
+#endif
+
     return r;
 
 fail:
@@ -312,6 +321,8 @@ nxt_http_request_start(nxt_task_t *task, void *obj, void *data)
     nxt_http_request_t  *r;
 
     r = obj;
+
+    NXT_OTEL_TRACE();
 
     r->state = &nxt_http_request_body_state;
 
@@ -583,6 +594,8 @@ nxt_http_request_ready(nxt_task_t *task, void *obj, void *data)
 
     r = obj;
     action = r->conf->socket_conf->action;
+
+    NXT_OTEL_TRACE();
 
     if (r->chunked) {
         ret = nxt_http_request_chunked_transform(r);
@@ -861,12 +874,12 @@ nxt_http_request_error_handler(nxt_task_t *task, void *obj, void *data)
 void
 nxt_http_request_close_handler(nxt_task_t *task, void *obj, void *data)
 {
-    nxt_int_t                ret;
     nxt_http_proto_t         proto;
     nxt_router_conf_t        *rtcf;
     nxt_http_request_t       *r;
     nxt_http_protocol_t      protocol;
     nxt_socket_conf_joint_t  *conf;
+    nxt_router_access_log_t  *access_log;
 
     r = obj;
     proto.any = data;
@@ -878,8 +891,10 @@ nxt_http_request_close_handler(nxt_task_t *task, void *obj, void *data)
         r->logged = 1;
 
         if (rtcf->access_log != NULL) {
-            ret = nxt_http_request_access_log(task, r, rtcf);
-            if (ret == NXT_OK) {
+            access_log = rtcf->access_log;
+
+            if (nxt_http_cond_value(task, r, &rtcf->log_cond)) {
+                access_log->handler(task, r, access_log, rtcf->log_format);
                 return;
             }
         }
@@ -908,57 +923,6 @@ nxt_http_request_close_handler(nxt_task_t *task, void *obj, void *data)
 
         nxt_mp_release(r->mem_pool);
     }
-}
-
-
-static nxt_int_t
-nxt_http_request_access_log(nxt_task_t *task, nxt_http_request_t *r,
-    nxt_router_conf_t *rtcf)
-{
-    nxt_int_t                ret;
-    nxt_str_t                str;
-    nxt_bool_t               expr;
-    nxt_router_access_log_t  *access_log;
-
-    access_log = rtcf->access_log;
-
-    expr = 1;
-
-    if (rtcf->log_expr != NULL) {
-
-        if (nxt_tstr_is_const(rtcf->log_expr)) {
-            nxt_tstr_str(rtcf->log_expr, &str);
-
-        } else {
-            ret = nxt_tstr_query_init(&r->tstr_query, rtcf->tstr_state,
-                                      &r->tstr_cache, r, r->mem_pool);
-            if (nxt_slow_path(ret != NXT_OK)) {
-                return NXT_DECLINED;
-            }
-
-            nxt_tstr_query(task, r->tstr_query, rtcf->log_expr, &str);
-
-            if (nxt_slow_path(nxt_tstr_query_failed(r->tstr_query))) {
-                return NXT_DECLINED;
-            }
-        }
-
-        if (str.length == 0
-            || nxt_str_eq(&str, "0", 1)
-            || nxt_str_eq(&str, "false", 5)
-            || nxt_str_eq(&str, "null", 4)
-            || nxt_str_eq(&str, "undefined", 9))
-        {
-            expr = 0;
-        }
-    }
-
-    if (rtcf->log_negate ^ expr) {
-        access_log->handler(task, r, access_log, rtcf->log_format);
-        return NXT_OK;
-    }
-
-    return NXT_DECLINED;
 }
 
 
@@ -1364,4 +1328,49 @@ int64_t
 nxt_http_cookie_hash(nxt_mp_t *mp, nxt_str_t *name)
 {
     return nxt_http_field_hash(mp, name, 1, NXT_HTTP_URI_ENCODING_NONE);
+}
+
+
+int
+nxt_http_cond_value(nxt_task_t *task, nxt_http_request_t *r,
+    nxt_tstr_cond_t *cond)
+{
+    nxt_int_t          ret;
+    nxt_str_t          str;
+    nxt_bool_t         expr;
+    nxt_router_conf_t  *rtcf;
+
+    rtcf = r->conf->socket_conf->router_conf;
+
+    expr = 1;
+
+    if (cond->expr != NULL) {
+
+        if (nxt_tstr_is_const(cond->expr)) {
+            nxt_tstr_str(cond->expr, &str);
+
+        } else {
+            ret = nxt_tstr_query_init(&r->tstr_query, rtcf->tstr_state,
+                                      &r->tstr_cache, r, r->mem_pool);
+            if (nxt_slow_path(ret != NXT_OK)) {
+                return -1;
+            }
+
+            ret = nxt_tstr_query(task, r->tstr_query, cond->expr, &str);
+            if (nxt_slow_path(ret != NXT_OK)) {
+                return -1;
+            }
+        }
+
+        if (str.length == 0
+            || nxt_str_eq(&str, "0", 1)
+            || nxt_str_eq(&str, "false", 5)
+            || nxt_str_eq(&str, "null", 4)
+            || nxt_str_eq(&str, "undefined", 9))
+        {
+            expr = 0;
+        }
+    }
+
+    return cond->negate ^ expr;
 }
