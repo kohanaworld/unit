@@ -1,0 +1,140 @@
+#FROM 5.6.40-zts-jessie
+FROM php:5.6-cli-stretch
+
+LABEL org.opencontainers.image.title="Unit (php5.6)"
+LABEL org.opencontainers.image.description="Official build of Unit for Docker."
+LABEL org.opencontainers.image.url="https://unit.nginx.org"
+LABEL org.opencontainers.image.source="https://github.com/nginx/unit"
+LABEL org.opencontainers.image.documentation="https://unit.nginx.org/installation/#docker-images"
+LABEL org.opencontainers.image.vendor="NGINX Docker Maintainers <docker-maint@nginx.com>"
+LABEL org.opencontainers.image.version="1.32.1"
+
+RUN echo "deb [trusted=yes] http://archive.debian.org/debian stretch main non-free contrib" > /etc/apt/sources.list \
+    && echo "deb-src [trusted=yes] http://archive.debian.org/debian stretch main non-free contrib" >> /etc/apt/sources.list \
+    && echo "deb [trusted=yes] http://archive.debian.org/debian-security stretch/updates main non-free contrib" >> /etc/apt/sources.list
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+ARG BUILD_PACKAGE="build-essential libfreetype6-dev libxml2-dev librabbitmq-dev libmemcached-dev libicu-dev libjpeg62-turbo-dev libmcrypt-dev libsodium-dev libpq-dev libpng-dev \
+libxml2-dev libzip-dev libxslt1-dev libpng-dev libmagickwand-dev libmagickcore-dev libwebp-dev libssl-dev libpcre2-dev libcurl4-openssl-dev"
+
+RUN apt-get update && apt-get install --no-install-recommends  --no-install-suggests  -y libwebp6 libxml2 librabbitmq4 libmemcached11  postgresql-client-common \
+ libsodium18 p7zip-full curl wget git  pkg-config imagemagick nano locales mc procps unzip iputils-ping  ${BUILD_PACKAGE}
+# https://fearby.com/article/manually-update-openssl-on-debian-to-1-1-1-t/ libgnutls-openssl27
+# https://www.openssl.org/source/old/1.1.1/index.html
+RUN set -eux; \
+ docker-php-source extract \
+    && php -m \
+    && cd /tmp && wget https://github.com/kohanaworld/php-src/archive/refs/tags/php-5.6.tar.gz \
+    && tar xzvf php-5.6.tar.gz && cd php-src-php-5.6 \
+    && mv -f ext/openssl/openssl.c /usr/src/php/ext/openssl/openssl.c \
+    && mv -f ext/openssl/tests/001.phpt /usr/src/php/ext/openssl/tests/001.phpt \
+    && mv -f ext/openssl/tests/bug41033.phpt /usr/src/php/ext/openssl/tests/bug41033.phpt \
+    && mv -f ext/openssl/tests/bug66501.phpt  /usr/src/php/ext/openssl/tests/bug66501.phpt \
+    && mv -f ext/openssl/tests/openssl_error_string_basic.phpt /usr/src/php/ext/openssl/tests/openssl_error_string_basic.phpt \
+    && mv -f ext/openssl/tests/sni_server.phpt /usr/src/php/ext/openssl/tests/sni_server.phpt \
+    && mv -f ext/openssl/xp_ssl.c /usr/src/php/ext/openssl/xp_ssl.c \
+    && mv -f ext/phar/util.c /usr/src/php/ext/phar/util.c \
+    && cd /usr/src/php \
+    && ./configure --enable-embed --enable-opcache --enable-mbstring --with-openssl \
+#    --with-system-ciphers \
+    --with-config-file-scan-dir=/usr/local/etc/php/conf.d \
+    --with-zlib --with-mysqli --with-pgsql  --with-libzip --with-curl --with-mcrypt --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ --with-png-dir=/usr/include/ --with-gd \
+    && pear channel-update pear.php.net \
+    && pecl channel-update pecl.php.net \
+    && pecl install msgpack-0.5.7 igbinary-2.0.8 apcu-4.0.8 redis-2.2.8  imagick memcache-3.0.8 amqp-1.11.0 raphf-1.1.2 propro-1.0.2 memcached-2.2.0 \
+    && docker-php-ext-enable msgpack igbinary apcu redis imagick memcache amqp raphf propro memcached \
+    && pecl install pecl_http-2.6.0 \
+    && docker-php-ext-enable http \
+    && docker-php-ext-install intl pdo_mysql xsl zip soap bcmath sockets pdo_pgsql zip  gettext \
+    #    && rm -rf /var/lib/apt/lists/*
+    && make -j "$(nproc)" \
+    && make install \
+    && cp /usr/local/etc/php/php.ini-development /usr/local/lib/php.ini \
+    && echo 'apc.enabled=1' >> /usr/local/lib/php.ini && echo 'apc.enable_cli=1' >> /usr/local/lib/php.ini \
+    && curl -s https://getcomposer.org/installer | php && mv composer.phar /usr/local/bin/composer \
+    && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen \
+    && sed -i 's/^# *\(fr_FR.UTF-8\)/\1/' /etc/locale.gen \
+    && sed -i 's/^# *\(de_DE.UTF-8\)/\1/' /etc/locale.gen \
+    && sed -i 's/^# *\(ru_RU.UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen && update-locale LANG=en_US.utf8 LC_ALL=en_US.utf8 LANGUAGE=en_US.utf8
+
+RUN set -ex \
+    && savedAptMark="$(apt-mark showmanual)" \
+    && apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests -y ca-certificates git build-essential libssl-dev libpcre2-dev curl pkg-config \
+    && mkdir -p /usr/lib/unit/modules /usr/lib/unit/debug-modules \
+    && mkdir -p /usr/src/unit \
+    && cd /usr/src/unit \
+    && git clone --depth 1 -b 1.32.1-1 https://github.com/nginx/unit \
+    && cd unit \
+    && NCPU="$(getconf _NPROCESSORS_ONLN)" \
+    && DEB_HOST_MULTIARCH="$(dpkg-architecture -q DEB_HOST_MULTIARCH)" \
+    && CC_OPT="$(DEB_BUILD_MAINT_OPTIONS="hardening=+all,-pie" DEB_CFLAGS_MAINT_APPEND="-Wp,-D_FORTIFY_SOURCE=2 -fPIC" dpkg-buildflags --get CFLAGS)" \
+    && LD_OPT="$(DEB_BUILD_MAINT_OPTIONS="hardening=+all,-pie" DEB_LDFLAGS_MAINT_APPEND="-Wl,--as-needed -pie" dpkg-buildflags --get LDFLAGS)" \
+    && CONFIGURE_ARGS_MODULES="--prefix=/usr \
+                --statedir=/var/lib/unit \
+                --control=unix:/var/run/control.unit.sock \
+                --runstatedir=/var/run \
+                --pid=/var/run/unit.pid \
+                --logdir=/var/log \
+                --log=/var/log/unit.log \
+                --tmpdir=/var/tmp \
+                --user=unit \
+                --group=unit \
+                --openssl \
+                --libdir=/usr/lib/$DEB_HOST_MULTIARCH" \
+    && CONFIGURE_ARGS="$CONFIGURE_ARGS_MODULES \
+                --njs" \
+    && make -j $NCPU -C pkg/contrib .njs \
+    && export PKG_CONFIG_PATH=$(pwd)/pkg/contrib/njs/build \
+    && ./configure $CONFIGURE_ARGS --cc-opt="$CC_OPT" --ld-opt="$LD_OPT" --modulesdir=/usr/lib/unit/debug-modules --debug \
+    && make -j $NCPU unitd \
+    && install -pm755 build/sbin/unitd /usr/sbin/unitd-debug \
+    && make clean \
+    && ./configure $CONFIGURE_ARGS --cc-opt="$CC_OPT" --ld-opt="$LD_OPT" --modulesdir=/usr/lib/unit/modules \
+    && make -j $NCPU unitd \
+    && install -pm755 build/sbin/unitd /usr/sbin/unitd \
+    && make clean \
+    && /bin/true \
+    && ./configure $CONFIGURE_ARGS_MODULES --cc-opt="$CC_OPT" --modulesdir=/usr/lib/unit/debug-modules --debug \
+    && ./configure php \
+    && make -j $NCPU php-install \
+    && make clean \
+    && ./configure $CONFIGURE_ARGS_MODULES --cc-opt="$CC_OPT" --modulesdir=/usr/lib/unit/modules \
+    && ./configure php \
+    && make -j $NCPU php-install \
+    && cd \
+    && rm -rf /usr/src/unit \
+    && for f in /usr/sbin/unitd /usr/lib/unit/modules/*.unit.so; do \
+        ldd $f | awk '/=>/{print $(NF-1)}' | while read n; do dpkg-query -S $n; done | sed 's/^\([^:]\+\):.*$/\1/' | sort | uniq >> /requirements.apt; \
+       done \
+    && apt-mark showmanual | xargs apt-mark auto > /dev/null \
+    && { [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; } \
+    && ldconfig \
+    && mkdir -p /var/lib/unit/ \
+    && mkdir -p /docker-entrypoint.d/ \
+    && groupadd --gid 999 unit \
+    && useradd \
+         --uid 999 \
+         --gid unit \
+         --no-create-home \
+         --home /nonexistent \
+         --comment "unit user" \
+         --shell /bin/false \
+         unit \
+    && apt-get update \
+    && apt-get --no-install-recommends --no-install-suggests -y install curl $(cat /requirements.apt) \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /requirements.apt \
+    && ln -sf /dev/stderr /var/log/unit.log
+
+COPY docker-entrypoint.sh /usr/local/bin/
+COPY welcome.* /usr/share/unit/welcome/
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+EXPOSE 80
+CMD ["unitd", "--no-daemon", "--control", "unix:/var/run/control.unit.sock"]
