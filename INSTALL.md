@@ -3,29 +3,30 @@
 ```shell
 DOCKER_BUILDKIT=1 make -j10 build-php5.6 VERSIONS_php=5.6 VARIANT=stretch
 DOCKER_BUILDKIT=1 make -j10 build-php7.3 VERSIONS_php=7.3 VARIANT=buster
-DOCKER_BUILDKIT=1 make -j10 build-php8.0 VERSIONS_php=8.0 VARIANT=buster
-DOCKER_BUILDKIT=1 make -j10 build-php8.1 VERSIONS_php=8.1 VARIANT=bookworm
 DOCKER_BUILDKIT=1 make -j10 build-php8.2 VERSIONS_php=8.2 VARIANT=bookworm
 DOCKER_BUILDKIT=1 make -j10 build-php8.3 VERSIONS_php=8.3 VARIANT=bookworm
+DOCKER_BUILDKIT=1 make -j10 build-php8.4 VERSIONS_php=8.4 VARIANT=bookworm
 ````
 ```shell
-docker scout cves --only-severity critical,high,medium unit:1.33.0-php5.6
-docker scout cves --only-severity critical,high,medium unit:1.33.0-php7.3
-docker scout cves --only-severity critical,high,medium unit:1.33.0-php8.2
+docker scout cves --only-severity critical,high,medium unit:1.34.2-php5.6
+docker scout cves --only-severity critical,high,medium unit:1.34.2-php7.3
+docker scout cves --only-severity critical,high,medium unit:1.34.2-php8.2
+docker scout cves --only-severity critical,high,medium unit:1.34.2-php8.2
+docker scout cves --only-severity critical,high,medium unit:1.34.2-php8.4
 ```
 
 ```shell
 cd /srv/www/github/kohana-world/kohana/
 cd /srv/www/github/phpclub/koseven
 
-docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.32.1-php7.3
+docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.34.2-php8.4
 docker exec -it unit bash
 ```
 
 ```shell
 
-# Debian bullseye  unit:1.32.1-php8.2
-docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.32.1-php8.2
+# Debian bullseye  unit:1.34.2-php8.4
+docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.34.2-php8.4
 docker exec -it unit bash
 
 apt-get update
@@ -57,7 +58,7 @@ var_dump(setlocale(LC_ALL, 'ru_RU.UTF-8'));
 var_dump(setlocale(LC_ALL, 'en_US.UTF-8'));
 ```
 
-docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.32.1-php7.3
+docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.34.2-php7.3
 
 
 curl -s https://getcomposer.org/installer | php && mv composer.phar /usr/local/bin/composer
@@ -100,7 +101,7 @@ RUN curl -s https://getcomposer.org/installer | php && mv composer.phar /usr/loc
 
 rm /usr/local/etc/php/conf.d/docker-php-ext-sodium.ini
 
-php-gd or php-imagick apcu redis memecache 
+php-gd or php-imagick apcu redis memcache 
 
     && cp /usr/local/etc/php/php.ini-development /usr/local/etc/php/php.ini \
     && echo 'apc.enabled=1' >> /usr/local/etc/php/php.ini && echo 'apc.enable_cli=1' >> /usr/local/etc/php/php.ini

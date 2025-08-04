@@ -55,7 +55,7 @@ INSTALL_perl ?=		perl-install
 RUN_perl ?=			/bin/true
 MODULE_PREBUILD_perl ?=	/bin/true
 
-VERSIONS_php ?=		8.3 8.4
+VERSIONS_php ?=		8.1 8.2 8.3 8.4
 VARIANT_php ?=		cli-$(VARIANT)
 $(foreach phpversion, $(VERSIONS_php), $(eval CONTAINER_php$(phpversion) = php:$(phpversion)-$(VARIANT_php)))
 CONFIGURE_php ?=	php
