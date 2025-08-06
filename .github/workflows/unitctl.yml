@@ -23,7 +23,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on:       
+      group: xmis
+      labels: [self-hosted, ubuntu-latest]
     defaults:
       run:
         working-directory: tools/unitctl
