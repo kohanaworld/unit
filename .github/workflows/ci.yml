@@ -347,8 +347,11 @@ jobs:
       # Ensure all users and processes can execute
       - name: Fix permissions
         run: |
-          sudo chmod -R +x /home/runner
-          namei -l ${{ github.workspace }}
+          sudo chmod -R +x "$GITHUB_WORKSPACE"
+          namei -l "$GITHUB_WORKSPACE"
+#        run: |
+#          sudo chmod -R +x /home/runner
+#          namei -l ${{ github.workspace }}
 
       # Install python3 if not present
       - uses: actions/setup-python@v5
