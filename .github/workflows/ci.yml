@@ -23,7 +23,9 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on:
+      group: xmis
+      labels: [self-hosted, ubuntu-latest]
     strategy:
       fail-fast: false
       matrix:
@@ -90,9 +92,14 @@ jobs:
           echo "module=${module}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "testpath=${testpath}" >> "$GITHUB_OUTPUT"
-
-          NJS_VERSION=$(sed -n "s/NJS_VERSION := \(.*\)/\1/p" pkg/contrib/src/njs/version)
-          echo "njs_version=${NJS_VERSION}" >> "$GITHUB_OUTPUT"
+          if [ -f pkg/contrib/src/njs/version ]; then
+            NJS_VERSION=$(sed -n "s/NJS_VERSION := \(.*\)/\1/p" pkg/contrib/src/njs/version)
+            echo "njs_version=${NJS_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Warning: pkg/contrib/src/njs/version not found"
+          fi
+          # NJS_VERSION=$(sed -n "s/NJS_VERSION := \(.*\)/\1/p" pkg/contrib/src/njs/version)
+          # echo "njs_version=${NJS_VERSION}" >> "$GITHUB_OUTPUT"
 
           cat "$GITHUB_OUTPUT"
 
@@ -353,8 +360,11 @@ jobs:
       # Ensure all users and processes can execute
       - name: Fix permissions
         run: |
-          sudo chmod -R +x /home/runner
-          namei -l ${{ github.workspace }}
+          sudo chmod -R +x "$GITHUB_WORKSPACE"
+          namei -l "$GITHUB_WORKSPACE"
+#        run: |
+#          sudo chmod -R +x /home/runner
+#          namei -l ${{ github.workspace }}
 
       # Install python3 if not present
       - uses: actions/setup-python@v5
