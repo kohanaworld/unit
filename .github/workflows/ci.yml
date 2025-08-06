@@ -21,7 +21,9 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on:
+      group: xmis
+      labels: [self-hosted, ubuntu-latest]
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +31,6 @@ jobs:
           # Core
           - build: unit
             os: ubuntu-latest
-            runner_group: xmis
           # Modules
           - build: go-1.21
             os: ubuntu-latest
