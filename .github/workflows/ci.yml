@@ -29,7 +29,7 @@ jobs:
           # Core
           - build: unit
             os: ubuntu-latest
-            runner_group: "xmis"
+            runner_group: xmis
           # Modules
           - build: go-1.21
             os: ubuntu-latest
