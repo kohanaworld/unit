@@ -23,7 +23,9 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on:
+     group: xmis
+     labels: [self-hosted, ubuntu-latest]
     strategy:
       fail-fast: false
       matrix:
