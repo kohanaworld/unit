@@ -54,9 +54,9 @@ jobs:
             os: ubuntu-latest
           - build: php-8.3
             os: ubuntu-latest
-          - build: python-3.11
+          - build: python-3.11.13
             os: ubuntu-latest
-          - build: python-3.12
+          - build: python-3.12.11
             os: ubuntu-latest
           - build: ruby-3.2
             os: ubuntu-latest
@@ -187,7 +187,7 @@ jobs:
 
       - name: Configure java
         run: |
-          sudo ./configure java
+          sudo  --preserve-env=JAVA_HOME ./configure java
         if: steps.metadata.outputs.module == 'java'
 
       - name: Make java
