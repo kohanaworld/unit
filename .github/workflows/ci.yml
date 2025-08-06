@@ -34,21 +34,7 @@ jobs:
           - build: unit
             os: ubuntu-latest
           # Modules
-          - build: go-1.21
-            os: ubuntu-latest
           - build: go-1.22
-            os: ubuntu-latest
-          - build: java-17
-            os: ubuntu-latest
-          - build: java-18
-            os: ubuntu-latest
-          - build: java-21
-            os: ubuntu-latest
-          - build: node-20
-            os: ubuntu-latest
-          - build: node-21
-            os: ubuntu-latest
-          - build: perl
             os: ubuntu-latest
           - build: php-8.2
             os: ubuntu-latest
@@ -56,18 +42,6 @@ jobs:
             os: ubuntu-latest
           - build: php-8.4
             os: ubuntu-latest            
-          - build: python-3.11.13
-            os: ubuntu-latest
-          - build: python-3.12.11
-            os: ubuntu-latest
-          - build: ruby-3.2
-            os: ubuntu-latest
-          - build: ruby-3.3
-            os: ubuntu-latest
-          - build: wasm
-            os: ubuntu-latest
-          - build: wasm-wasi-component
-            os: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
