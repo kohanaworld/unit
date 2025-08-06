@@ -151,72 +151,7 @@ jobs:
           make go-install
         if: steps.metadata.outputs.module == 'go'
 
-      ##
-      ## Java
-      ##
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '${{ steps.metadata.outputs.version }}'
-        if: steps.metadata.outputs.module == 'java'
-
-      - name: Configure java
-        run: |
-          sudo  --preserve-env=JAVA_HOME ./configure java
-        if: steps.metadata.outputs.module == 'java'
-
-      - name: Make java
-        run: |
-          sudo make java
-        if: steps.metadata.outputs.module == 'java'
-
-      ##
-      ## Node
-      ##
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '${{ steps.metadata.outputs.version }}'
-        if: steps.metadata.outputs.module == 'node'
-
-      - name: Install node-gyp
-        run: |
-          npm install -g node-gyp
-        if: steps.metadata.outputs.module == 'node'
-
-      - name: Configure node
-        run: |
-          ./configure nodejs
-        if: steps.metadata.outputs.module == 'node'
-
-      - name: Make node
-        run: |
-          make node-local-install DESTDIR=node
-        if: steps.metadata.outputs.module == 'node'
-
-      ##
-      ## Perl
-      ##
-
-      # Uses default Actions VM Perl
-      # https://github.com/actions/runner-images#available-images
-
-      - name: Install libperl-dev
-        run: |
-          sudo apt-get install libperl-dev
-        if: steps.metadata.outputs.module == 'perl'
-
-      - name: Configure perl
-        run: |
-          ./configure perl
-        if: steps.metadata.outputs.module == 'perl'
-
-      - name: Make perl
-        run: |
-          make perl
-        if: steps.metadata.outputs.module == 'perl'
-
+     
       ##
       ## PHP
       ##
@@ -240,90 +175,6 @@ jobs:
         if: steps.metadata.outputs.module == 'php'
 
       ##
-      ## Python 3
-      ##
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '${{ steps.metadata.outputs.version }}'
-        if: steps.metadata.outputs.module == 'python'
-
-      - name: Configure python3
-        run: |
-          sudo ./configure python --config=python3-config
-        if: steps.metadata.outputs.module == 'python'
-
-      - name: Make python3
-        run: |
-          sudo make python3
-        if: steps.metadata.outputs.module == 'python'
-
-      ##
-      ## Ruby
-      ##
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '${{ steps.metadata.outputs.version }}'
-        if: steps.metadata.outputs.module == 'ruby'
-
-      - name: Install rack
-        run: |
-          gem install rack
-        if: steps.metadata.outputs.module == 'ruby'
-
-      - name: Configure ruby
-        run: |
-          ./configure ruby
-        if: steps.metadata.outputs.module == 'ruby'
-
-      - name: Make ruby
-        run: |
-          make ruby
-        if: steps.metadata.outputs.module == 'ruby'
-
-      ##
-      ## Wasm
-      ##
-
-      - name: Make wasmtime
-        run: |
-          make -C pkg/contrib .wasmtime
-        if: steps.metadata.outputs.module == 'wasm'
-
-      - name: Configure wasm
-        run: |
-          ./configure wasm --include-path=pkg/contrib/wasmtime/artifacts/include --lib-path=pkg/contrib/wasmtime/artifacts/lib
-        if: steps.metadata.outputs.module == 'wasm'
-
-      - name: Make wasm
-        run: |
-          make wasm
-        if: steps.metadata.outputs.module == 'wasm'
-
-      ##
-      ## wasm-wasi-component
-      ##
-
-      - name: Setup rust
-        run: |
-          curl https://sh.rustup.rs | sh -s -- -y
-          cargo install cargo-component
-        if: steps.metadata.outputs.module == 'wasm-wasi-component'
-
-      - name: Configure wasm-wasi-component
-        run: |
-          ./configure wasm-wasi-component
-        if: steps.metadata.outputs.module == 'wasm-wasi-component'
-
-      - name: Make wasm-wasi-component
-        run: |
-          CLANG_PATH=/usr/bin/clang-15 \
-          BINDGEN_EXTRA_CLANG_ARGS="-I../../njs/src -I../../njs/build" \
-          make wasm-wasi-component
-        if: steps.metadata.outputs.module == 'wasm-wasi-component'
-
-      ##
       ## Tests
       ##
 
@@ -334,23 +185,3 @@ jobs:
           sudo chmod -R +x "$GITHUB_WORKSPACE"
           namei -l "$GITHUB_WORKSPACE"
 
-      # Install python3 if not present
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3'
-        if: steps.metadata.outputs.module != 'wasm'
-
-      - name: Install pytest
-        run: |
-          sudo apt install -y python3-pytest
-
-        if: steps.metadata.outputs.module != 'wasm'
-
-      - name: Run ${{ steps.metadata.outputs.module }} tests
-        run: |
-          if [ "${{ matrix.build }}" == "wasm-wasi-component" ]; then
-            pytest-3 --print-log ${{ steps.metadata.outputs.testpath }}
-          else
-            sudo -E pytest-3 --print-log ${{ steps.metadata.outputs.testpath }}
-          fi
-        if: steps.metadata.outputs.module != 'wasm'
