@@ -24,8 +24,8 @@ on:
 jobs:
   test:
     runs-on:
-     group: xmis
-     labels: [self-hosted, ubuntu-latest]
+     # group: xmis
+     labels: [self-hosted, k3s]
     strategy:
       fail-fast: false
       matrix:
