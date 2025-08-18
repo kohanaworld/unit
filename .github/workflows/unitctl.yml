@@ -24,8 +24,8 @@ permissions:
 jobs:
   test:
     runs-on:       
-      group: xmis
-      labels: [self-hosted, ubuntu-latest]
+      # group: xmis
+      labels:  [self-hosted, k3s]
     defaults:
       run:
         working-directory: tools/unitctl
