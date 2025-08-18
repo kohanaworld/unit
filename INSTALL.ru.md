@@ -1,4 +1,4 @@
-Свои сборки под Kohana World
+KohanaWorld Version
 
 ```shell
 DOCKER_BUILDKIT=1 make -j10 build-php5.6 VERSIONS_php=5.6 VARIANT=stretch
@@ -16,8 +16,8 @@ docker scout cves --only-severity critical,high,medium unit:1.34.2-php8.4
 ```
 
 ```shell
-cd /srv/www/github/kohana-world/kohana/
-cd /srv/www/github/phpclub/koseven
+cd /kvm/srv/www/github/kohana-world/kohana/
+cd /kvm/srv/www/github/phpclub/koseven
 
 docker run --name unit -d -p 80:80 -v $(pwd):/app unit:1.34.2-php8.4
 docker exec -it unit bash
@@ -34,7 +34,7 @@ apt-get upgrade
 apt-get install procps locales apt-utils sudo  nano
 ```
 
-На дебиан и убунту можно сделать так сначала 
+На debian и ubuntu можно сделать так сначала 
   ```
   # Uncomment en_US.UTF-8 for inclusion in generation  
   apt install locales

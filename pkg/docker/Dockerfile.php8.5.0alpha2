@@ -1,6 +1,6 @@
-FROM php:8.4-cli-bookworm
+FROM php:8.5.0alpha2-bookworm
 
-LABEL org.opencontainers.image.title="Unit (php8.4)"
+LABEL org.opencontainers.image.title="Unit (php8.5)"
 LABEL org.opencontainers.image.description="Official build of Unit for Docker."
 LABEL org.opencontainers.image.url="https://unit.nginx.org"
 LABEL org.opencontainers.image.source="https://github.com/nginx/unit"
@@ -8,9 +8,9 @@ LABEL org.opencontainers.image.documentation="https://unit.nginx.org/installatio
 LABEL org.opencontainers.image.vendor="NGINX Docker Maintainers <docker-maint@nginx.com>"
 LABEL org.opencontainers.image.version="1.34.2"
 ARG DEBIAN_FRONTEND=noninteractive
-ARG BUILD_PACKAGE="build-essential  libsqlite3-dev libonig-dev  librabbitmq-dev libfreetype6-dev libxml2-dev libicu-dev libjpeg62-turbo-dev libmcrypt-dev libsodium-dev libpng-dev \
+ARG BUILD_PACKAGE="build-essential  libsqlite3-dev libonig-dev  librabbitmq-dev libfreetype6-dev libxml2-dev libicu-dev libjpeg62-turbo-dev libmcrypt-dev libsodium-dev libpq-dev libpng-dev \
 libxml2-dev libzip-dev libpng-dev libmagickwand-dev libmagickcore-dev libwebp-dev libssl-dev libpcre2-dev libcurl4-openssl-dev  libgmp3-dev libexif-dev  libavif-dev libxpm-dev"
-RUN set -eux && apt-get update  && apt-get upgrade -y && apt-get install --no-install-recommends  --no-install-suggests  -y libwebp7 libxml2 sqlite3 libonig5 librabbitmq4 postgresql-client-common  libpq-dev libpq5 libssl-dev \
+RUN set -eux && apt-get update  && apt-get upgrade -y && apt-get install --no-install-recommends  --no-install-suggests  -y libwebp7 libxml2 sqlite3 libonig5 librabbitmq4 postgresql-client-common \
  libsodium23 p7zip-full curl git  pkg-config imagemagick nano locales mc procps unzip iputils-ping libxslt1-dev libzip4 libzip-dev libxslt1.1  libgmp10 libexif12  libavif15 libxpm4  ${BUILD_PACKAGE} \
 #configure: WARNING: unrecognized options: --enable-opcache-file, --with-libzip, --with-freetype-dir, --with-jpeg-dir, --with-webp-dir, --with-png-dir, --with-gd
 #RUN set -eux; \
@@ -21,8 +21,9 @@ RUN set -eux && apt-get update  && apt-get upgrade -y && apt-get install --no-in
     --with-zlib --with-mysqli --with-pgsql --with-curl  --with-gmp  --enable-exif  --enable-ftp  --with-jpeg --with-jpeg --with-avif --with-xpm \
     && pear channel-update pear.php.net \
     && pecl channel-update pecl.php.net \
-    && pecl install msgpack igbinary apcu redis  imagick memcache-8.2 amqp \
-    && docker-php-ext-enable msgpack igbinary apcu redis imagick memcache amqp \
+    && pecl install msgpack igbinary apcu redis  imagick memcache-8.2 \
+##  AMQP doesn't compile with php8.5 alpha2 release  https://github.com/php-amqp/php-amqp/issues/596
+    && docker-php-ext-enable msgpack igbinary apcu redis imagick memcache \
     && docker-php-ext-install intl pdo_mysql xsl zip soap bcmath sockets pdo_pgsql zip gettext \
     #    && rm -rf /var/lib/apt/lists/*
     && make -j "$(nproc)" \
@@ -136,10 +137,11 @@ STOPSIGNAL SIGTERM
 EXPOSE 80
 CMD ["unitd", "--no-daemon", "--control", "unix:/var/run/control.unit.sock"]
 
-ARG S6_OVERLAY_VERSION=3.2.0.0
+ARG S6_OVERLAY_VERSION=3.2.1.0
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
 RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
+RUN ls -la /tmp
+RUN tar -C / -Jxpf /tmp/s6php-overlay-x86_64.tar.xz
 ENTRYPOINT ["/init"]
 
